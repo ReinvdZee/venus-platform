@@ -202,6 +202,8 @@ void SwitchableOutputMonitor::handleSwitchableOutputFunctionChanged(VeQItem *cha
 		return;
 
 	// Clean up any existing function before applying the new function.
+	if (existing)
+		qInfo() << "Removing function for channel" << channelItem->id();
 	removeFunction(channelItem);
 
 	// Create the new function based on the function type.
@@ -230,7 +232,6 @@ void SwitchableOutputMonitor::removeFunction(VeQItem *channelItem)
 	if (!outputFunction)
 		return;
 
-	qInfo() << "Removing function for channel" << channelItem->id();
 	removeGeneratorStartStopFunction(outputFunction);
 	// Stop it from controlling the output while the delete is pending.
 	outputFunction->detach();
@@ -239,12 +240,14 @@ void SwitchableOutputMonitor::removeFunction(VeQItem *channelItem)
 
 void SwitchableOutputMonitor::onChannelItemDestroyed(QObject *obj)
 {
-	VeQItem *channelItem = qobject_cast<VeQItem *>(obj);
-	if (!channelItem)
-		return;
+	// Only use it as a key: destroyed() is emitted after ~VeQItem, so qobject_cast would return nullptr.
+	VeQItem *channelItem = static_cast<VeQItem *>(obj);
 
 	// Prevent leaks and stale entries if the channel disappears mid-setup.
 	mPendingFunctions.remove(channelItem);
+	// Its output is going away with it, don't switch it off on removal.
+	if (SwitchableOutputFunction *outputFunction = mFunctions.value(channelItem))
+		outputFunction->detach();
 	removeFunction(channelItem);
 }
 
@@ -270,6 +273,9 @@ void SwitchableOutputMonitor::removeGeneratorStartStopFunction(SwitchableOutputF
 	auto *generatorFunction = qobject_cast<SwitchableOutputFunctionGeneratorStartStop *>(outputFunction);
 	if (!generatorFunction || !mGeneratorStartStopFunctions.remove(generatorFunction))
 		return;
+
+	// Like dbus-generator does for the relay, switch the output off before no longer controlling it.
+	generatorFunction->setOutput(false);
 
 	if (mGeneratorStartStopFunctions.isEmpty()) {
 		// startstop0 will go away, start fresh when it is needed again.
